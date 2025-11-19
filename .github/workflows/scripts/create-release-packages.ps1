@@ -14,7 +14,7 @@
 
 .PARAMETER Agents
     Comma or space separated subset of agents to build (default: all)
-    Valid agents: claude, gemini, copilot, cursor-agent, qwen, opencode, windsurf, codex, kilocode, auggie, roo, codebuddy, amp, q
+    Valid agents: claude, gemini, copilot, cursor-agent, qwen, opencode, windsurf, codex, kilocode, auggie, roo, codebuddy, amp, q, cn
 
 .PARAMETER Scripts
     Comma or space separated subset of script types to build (default: both)
@@ -65,6 +65,42 @@ function Rewrite-Paths {
     $Content = $Content -replace '(/?)\bscripts/', '.specify/scripts/'
     $Content = $Content -replace '(/?)\btemplates/', '.specify/templates/'
     return $Content
+}
+
+function Inject-ContinueMetadata {
+    param(
+        [string]$Content,
+        [string]$CommandName
+    )
+    
+    $lines = $Content -split "`n"
+    $outputLines = @()
+    $inFrontmatter = $false
+    $dashCount = 0
+    $injected = $false
+    
+    foreach ($line in $lines) {
+        if ($line -match '^---$') {
+            $outputLines += $line
+            $dashCount++
+            if ($dashCount -eq 1) {
+                $inFrontmatter = $true
+            } else {
+                $inFrontmatter = $false
+            }
+            continue
+        }
+        
+        if ($inFrontmatter -and -not $injected -and $line -match '^[a-zA-Z]') {
+            $outputLines += "name: $CommandName"
+            $outputLines += "invokable: true"
+            $injected = $true
+        }
+        
+        $outputLines += $line
+    }
+    
+    return $outputLines -join "`n"
 }
 
 function Generate-Commands {
@@ -169,6 +205,9 @@ function Generate-Commands {
                 Set-Content -Path $outputFile -Value $output -NoNewline
             }
             'md' {
+                if ($Agent -eq 'cn') {
+                    $body = Inject-ContinueMetadata -Content $body -CommandName "speckit.$name"
+                }
                 Set-Content -Path $outputFile -Value $body -NoNewline
             }
             'agent.md' {
@@ -339,6 +378,17 @@ function Build-Variant {
             $cmdDir = Join-Path $baseDir ".amazonq/prompts"
             Generate-Commands -Agent 'q' -Extension 'md' -ArgFormat '$ARGUMENTS' -OutputDir $cmdDir -ScriptVariant $Script
         }
+        'cn' {
+            $cmdDir = Join-Path $baseDir ".continue/prompts"
+            Generate-Commands -Agent 'cn' -Extension 'md' -ArgFormat '$ARGUMENTS' -OutputDir $cmdDir -ScriptVariant $Script
+            
+            # Generate companion rules file for Continue IDE extensions
+            $rulesDir = Join-Path $baseDir ".continue/rules"
+            New-Item -ItemType Directory -Path $rulesDir -Force | Out-Null
+            if (Test-Path "agent_templates/continue/specify-rules.md") {
+                Copy-Item -Path "agent_templates/continue/specify-rules.md" -Destination (Join-Path $rulesDir "specify-rules.md")
+            }
+        }
     }
     
     # Create zip archive
@@ -348,7 +398,7 @@ function Build-Variant {
 }
 
 # Define all agents and scripts
-$AllAgents = @('claude', 'gemini', 'copilot', 'cursor-agent', 'qwen', 'opencode', 'windsurf', 'codex', 'kilocode', 'auggie', 'roo', 'codebuddy', 'amp', 'q')
+$AllAgents = @('claude', 'gemini', 'copilot', 'cursor-agent', 'qwen', 'opencode', 'windsurf', 'codex', 'kilocode', 'auggie', 'roo', 'codebuddy', 'amp', 'q', 'cn')
 $AllScripts = @('sh', 'ps')
 
 function Normalize-List {

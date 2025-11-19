@@ -6,7 +6,7 @@ set -euo pipefail
 # Usage: .github/workflows/scripts/create-release-packages.sh <version>
 #   Version argument should include leading 'v'.
 #   Optionally set AGENTS and/or SCRIPTS env vars to limit what gets built.
-#     AGENTS  : space or comma separated subset of: claude gemini copilot cursor-agent qwen opencode windsurf codex amp shai (default: all)
+#     AGENTS  : space or comma separated subset of: claude gemini copilot cursor-agent qwen opencode windsurf codex amp shai cn (default: all)
 #     SCRIPTS : space or comma separated subset of: sh ps (default: both)
 #   Examples:
 #     AGENTS=claude SCRIPTS=sh $0 v0.2.0
@@ -35,6 +35,29 @@ rewrite_paths() {
     -e 's@(/?)memory/@.specify/memory/@g' \
     -e 's@(/?)scripts/@.specify/scripts/@g' \
     -e 's@(/?)templates/@.specify/templates/@g'
+}
+
+# Add frontmatter metadata for Continue prompts to make them invokable slash commands
+# Continue IDE extensions load markdown files from .continue/prompts and convert
+# rules with invokable:true into slash commands
+inject_continue_metadata() {
+  local command_name=$1
+  
+  awk -v cmd_name="$command_name" '
+    BEGIN { in_frontmatter=0; injected=0 }
+    /^---$/ {
+      print
+      if (++dash_count == 1) in_frontmatter=1
+      else in_frontmatter=0
+      next
+    }
+    in_frontmatter && !injected && /^[a-zA-Z]/ {
+      print "name: " cmd_name
+      print "invokable: true"
+      injected=1
+    }
+    { print }
+  '
 }
 
 generate_commands() {
@@ -94,6 +117,9 @@ generate_commands() {
         body=$(printf '%s\n' "$body" | sed 's/\\/\\\\/g')
         { echo "description = \"$description\""; echo; echo "prompt = \"\"\""; echo "$body"; echo "\"\"\""; } > "$output_dir/speckit.$name.$ext" ;;
       md)
+        if [[ "$agent" == "cn" ]]; then
+          body=$(printf '%s\n' "$body" | inject_continue_metadata "speckit.$name")
+        fi
         echo "$body" > "$output_dir/speckit.$name.$ext" ;;
       agent.md)
         echo "$body" > "$output_dir/speckit.$name.$ext" ;;
@@ -211,13 +237,16 @@ build_variant() {
     q)
       mkdir -p "$base_dir/.amazonq/prompts"
       generate_commands q md "\$ARGUMENTS" "$base_dir/.amazonq/prompts" "$script" ;;
+    cn)
+      mkdir -p "$base_dir/.continue/prompts/"
+      generate_commands cn md "\$ARGUMENTS" "$base_dir/.continue/prompts" "$script" ;;
   esac
   ( cd "$base_dir" && zip -r "../spec-kit-template-${agent}-${script}-${NEW_VERSION}.zip" . )
   echo "Created $GENRELEASES_DIR/spec-kit-template-${agent}-${script}-${NEW_VERSION}.zip"
 }
 
 # Determine agent list
-ALL_AGENTS=(claude gemini copilot cursor-agent qwen opencode windsurf codex kilocode auggie roo codebuddy amp shai q)
+ALL_AGENTS=(claude gemini copilot cursor-agent qwen opencode windsurf codex kilocode auggie roo codebuddy amp shai q, cn)
 ALL_SCRIPTS=(sh ps)
 
 norm_list() {
